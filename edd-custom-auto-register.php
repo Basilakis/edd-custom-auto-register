@@ -142,6 +142,12 @@ final class EDD_Custom_Auto_Register {
 		$customer = new EDD_Customer( $payment_data['user_info']['email'] );
 		$customer->update( array( 'user_id' => $user_id ) );
 
+		// Attach address info to user
+		if( isset( $payment_data['user_info']['address'] ) ) {
+			$address_info = $payment_data['user_info']['address'];
+			update_user_meta( $user_id, '_edd_user_address', $address_info );
+		}
+
 		// Allow themes and plugins to hook
 		do_action( 'edd_auto_register_insert_user', $user_id, $user_args, $payment_id );
 	}
