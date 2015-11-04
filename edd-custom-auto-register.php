@@ -46,10 +46,14 @@ final class EDD_Custom_Auto_Register {
 
 		// accounts are never pending (since we use email verification anyway)
 		add_filter( 'edd_user_pending_verification', '__return_false' );
-		add_action( 'edd_post_set_user_to_pending', array( $this, 'remove_pending_meta' ) );
 
 		// create user when purchase is created
 		add_action( 'edd_insert_payment', array( $this, 'maybe_insert_user' ), 10, 2 );
+
+		// login customer if this is his or hers first payment ever
+		// this needs prio 9 because email notification resets the password right now\
+		// @todo fix this
+//		add_action( 'edd_auto_register_insert_user', array( $this, 'login_customer' ), 9, 3 );
 
 		// add our new email notifications
 		add_action( 'edd_auto_register_insert_user', array( $this, 'email_notifications' ), 10, 3 );
@@ -74,16 +78,40 @@ final class EDD_Custom_Auto_Register {
 	 *
 	 * @since 1.1
 	 */
-	public function email_notifications( $user_id = 0, $user_data = array() ) {
+	public function email_notifications( $user_id, $user_data, $payment_id ) {
+		// use wp_new_user_notification for email to the user
+		// note that this is the bread & butter of this plugin right now, as it emails a password reset link to the created user.
+		// before clicking the link in that email, there's no way for users to log-in.
+		wp_new_user_notification( $user_id );
+	}
 
-		$user = get_userdata( $user_id );
-		if ( ! $user instanceof WP_User ) {
+	/**
+	 * Login customer if this is first and only payment by customer email address
+	 *
+	 * @param int $user_id
+	 * @param array $user_data
+	 * @param int $payment_id
+	 * @todo fix this method
+	 */
+	public function login_customer( $user_id, $user_data, $payment_id ) {
+
+		// only log-in when processing payment from checkout
+		if( is_user_logged_in() || ! did_action( 'edd_purchase' ) ) {
 			return;
 		}
 
-		// use wp_new_user_notification for email to the user
-		wp_new_user_notification( $user_id );
+		// query payments by this email
+		$payments = edd_get_payments( array(
+				'user' => $user_data['user_email'],
+				'status' => array( 'publish' ),
+				'number' => 2
+			)
+		);
 
+		// log user in if this is his first payment ever
+		if( empty( $payments ) ) {
+			edd_log_user_in( $user_id, $user_data['user_login'], $user_data['user_pass'] );
+		}
 	}
 
 
@@ -100,10 +128,12 @@ final class EDD_Custom_Auto_Register {
 		}
 
 		// User account with given email already exists
+		// Don't remove this line or people will get multiple accounts when accidentally checking out when not logged-in
 		if ( get_user_by( 'email', $payment_data['user_info']['email'] ) ) {
 			return;
 		}
 
+		// Try to create a username
 		$username = $this->create_username_from_payment_user_info( $payment_data['user_info'] );
 		if( empty( $username ) ) {
 			return;
